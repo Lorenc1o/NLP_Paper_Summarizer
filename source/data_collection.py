@@ -23,10 +23,12 @@ def get_arxiv_data(query):
         return None
     
     data = response.content
+    print(data)
     root = etree.fromstring(data)
 
     paper_urls = []
     dois = []
+    abstracts = []
     for entry in root.findall('{http://www.w3.org/2005/Atom}entry'):
         pdf_link = None
         doi_link = None
@@ -40,8 +42,9 @@ def get_arxiv_data(query):
         if pdf_link and doi_link:
             paper_urls.append(pdf_link)
             dois.append(doi_link)
+            abstracts.append(entry.find('{http://www.w3.org/2005/Atom}summary').text)
 
-    return root, paper_urls, dois
+    return root, paper_urls, dois, abstracts
 
 
 def get_pdf_from_url(url):
@@ -66,16 +69,21 @@ def extract_text_from_pdf(pdf_path):
 
 def get_data_from_arxiv(query):
     """Get data from arXiv API based on query."""
-    root, paper_urls = get_arxiv_data(query)
-    for url in paper_urls:
+    _, paper_urls, dois, abstracts = get_arxiv_data(query)
+    for i in range(len(paper_urls)):
+        url = paper_urls[i]
         print(url)
         get_pdf_from_url(url)
         text = extract_text_from_pdf(f'data/{url.split("/")[-1]}.pdf')
-        print(text) 
+        
+        data_dir = 'data/'
+        with open(f'{data_dir}/text/{url.split("/")[-1]}.txt', 'w') as f:
+            f.write(text)
+
+        with open(f'{data_dir}/abstract/{url.split("/")[-1]}.txt', 'w') as f:
+            f.write(abstracts[i])
+
 
 if __name__ == '__main__':
-    query = 'search_query=all:electron&start=100&max_results=1'
-    _,urls,dois = get_arxiv_data(query)
-
-    print(urls)
-    print(dois)
+    query = 'search_query=all:electron&start=10&max_results=1'
+    get_data_from_arxiv(query)
