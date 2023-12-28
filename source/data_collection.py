@@ -4,6 +4,7 @@ from PyPDF2 import PdfReader
 
 import requests
 from lxml import etree
+import re
 
 def get_arxiv_data(query):
     """
@@ -23,7 +24,7 @@ def get_arxiv_data(query):
         return None
     
     data = response.content
-    print(data)
+    # print(data)
     root = etree.fromstring(data)
 
     paper_urls = []
@@ -77,13 +78,35 @@ def get_data_from_arxiv(query):
         text = extract_text_from_pdf(f'data/{url.split("/")[-1]}.pdf')
         
         data_dir = 'data/'
+
+        formatted_text, formatted_abstract = clean_text(text, abstracts[i])
+
         with open(f'{data_dir}/text/{url.split("/")[-1]}.txt', 'w') as f:
-            f.write(text)
+            f.write(formatted_text)
 
         with open(f'{data_dir}/abstract/{url.split("/")[-1]}.txt', 'w') as f:
-            f.write(abstracts[i])
+            f.write(formatted_abstract)
 
+def clean_text(text, abstract):
+    """"""
+    ## Cleaning Abstract
+    abstract = abstract.strip()
+    # Removing word splits
+    formatted_abstract = re.sub(r'(-)\n(.)', r'\2', abstract)
+    # Removing unnecessary line splits
+    formatted_abstract = re.sub(r'(?<![?!\.])\n(.)', r' \1', formatted_abstract)
+
+    ## Cleaning Body
+    text = text.strip()
+    # Removing word splits
+    formatted_text = re.sub(r'(-)\n(.)', r'\2', text)
+    # Removing unnecessary line splits
+    formatted_text = re.sub(r'(?<![?!\.])\n(.)', r' \1', formatted_text)
+    # Removing graph symbols like /s45
+    formatted_text = re.sub(r'/s(\d+)', r'', formatted_text)
+    
+    return formatted_text, formatted_abstract
 
 if __name__ == '__main__':
-    query = 'search_query=all:electron&start=10&max_results=1'
+    query = 'search_query=all:electron&start=0&max_results=3'
     get_data_from_arxiv(query)
