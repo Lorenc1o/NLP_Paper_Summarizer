@@ -1,2 +1,3 @@
 data/*
 source/preprocessing/data/*
+mapping_for_corenlp.txt
