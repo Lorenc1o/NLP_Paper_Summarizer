@@ -16,7 +16,7 @@ import numpy as np
 
 import json
 
-from model_update import EncoderModel, LinearClassifier, Summarizer
+from source.models.models import EncoderModel, LinearClassifier, Summarizer
 
 def generate_oracle_summary(document, abstract, max_sentences=None, min_sentence_length=20):
     '''

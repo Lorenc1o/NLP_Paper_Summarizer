@@ -1,5 +1,5 @@
 import torch
-from model_update import EncoderModel, LinearClassifier, Summarizer
+from models.models import EncoderModel, LinearClassifier, Summarizer
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 from transformers import AdamW
@@ -114,8 +114,8 @@ def plot_loss(train_history, val_history):
     plt.show()
 
 if __name__ == '__main__':
-    training_loc = 'data/arxiv_summarization/stories/test.pt'
-    validation_loc = 'data/arxiv_summarization/stories/validation.pt'
+    training_loc = 'preprocessing/data/arxiv_summarization/stories/test.pt'
+    validation_loc = 'preprocessing/data/arxiv_summarization/stories/validation.pt'
 
     data_train = read_pt_file(training_loc)
     dataset_train = SummarizationDataset(data_train)
