@@ -26,6 +26,7 @@ def trim_sequences(input_ids, attention_mask, abstract_vector, cls_idx, max_len=
         cls_idx_upd = cls_idx[cls_idx < max_len]
         # For abstract_vector, we keep the same entries as cls_idx
         abstract_vector = abstract_vector[cls_idx < max_len]
+
     return input_ids, attention_mask, abstract_vector, cls_idx_upd
 
 class SummarizationDataset(Dataset):
@@ -47,7 +48,7 @@ def collate_fn(batch):
     # Padding sequences to the maximum length in this batch
     input_ids_padded = pad_sequence(input_ids, batch_first=True, padding_value=0)
     attention_masks_padded = pad_sequence(attention_masks, batch_first=True, padding_value=0)
-    labels_padded = pad_sequence(labels, batch_first=True, padding_value=-100) 
+    labels_padded = pad_sequence(labels, batch_first=True, padding_value=0) 
 
     return input_ids_padded, attention_masks_padded, labels_padded, cls_idx
 

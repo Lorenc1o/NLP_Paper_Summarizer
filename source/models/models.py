@@ -1,6 +1,7 @@
 from transformers import DistilBertModel, DistilBertConfig
 import torch.nn as nn
 import torch
+import numpy as np
 
 class EncoderModel(nn.Module):
     def __init__(self):
@@ -36,9 +37,9 @@ class Summarizer(nn.Module):
         # Assume encoded_output shape: [batch_size, sequence_length, hidden_size]
         # cls_idx is a list of lists of indices for [CLS] tokens
 
-        # Batch size and number of sentences (assuming each example has the same number of sentences)
+        # Batch size and number of sentences (as the max number of sentences in all batch)
         batch_size = encoded_output.shape[0]
-        num_sentences = len(cls_idx[0]) if batch_size > 1 else len(cls_idx)
+        num_sentences = np.max([len(x) for x in cls_idx])
 
         # Initialize an empty tensor to store the [CLS] embeddings
         cls_embeddings = torch.zeros(batch_size, num_sentences, encoded_output.shape[2])

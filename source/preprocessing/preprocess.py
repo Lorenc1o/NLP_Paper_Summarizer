@@ -16,8 +16,6 @@ import numpy as np
 
 import json
 
-from source.models.models import EncoderModel, LinearClassifier, Summarizer
-
 def generate_oracle_summary(document, abstract, max_sentences=None, min_sentence_length=20):
     '''
         Generates an oracle summary for a given text with a given summary.
@@ -123,57 +121,44 @@ def preprocess(text):
     tokenized_text = ['[CLS] ' + sent + ' [SEP]' for sent in sentences]
     return tokenized_text
 
-def encode_sentences(sentences, tokenizer):
+def encode_sentences(sentences, tokenizer, max_length=512):
     '''
-        Encode the sentences using the tokenizer
+    Encode the concatenated sentences using the tokenizer. Each sentence has [CLS] at the start and [DEL] at the end.
 
-        Args:
-            sentences: the sentences to encode
-            tokenizer: the tokenizer to use
+    Args:
+        sentences: the sentences to encode
+        tokenizer: the tokenizer to use
+        max_length: the maximum length of the sequence after concatenation
 
-        Returns:
-            input_ids: the input ids for the sentences
-            attention_masks: the attention masks for the sentences
-            cls_idx: the indices of the [CLS] tokens
+    Returns:
+        input_ids: the input ids for the concatenated sentences
+        attention_masks: the attention masks for the concatenated sentences
+        cls_idx: the indices of the [CLS] tokens
     '''
-    input_ids = []
-    attention_masks = []
-    cls_idx = [0]
+    # Concatenate all sentences into one large string
+    full_text = ' '.join(sentences)
+    encoded_dict = tokenizer.encode_plus(
+        full_text,
+        add_special_tokens=False,  # Since [CLS] and [DEL] are already added in sentences
+        return_attention_mask=True,
+        return_tensors='pt',
+        truncation=False,
+        max_length=max_length
+    )
 
-    for i, sent in enumerate(sentences):
-        encoded_dict = tokenizer.encode_plus(
-                            sent,
-                            add_special_tokens = False,
-                            max_length = 128,
-                            pad_to_max_length = True,
-                            return_attention_mask = True,
-                            return_tensors = 'pt',
-                       )
-        input_ids.append(encoded_dict['input_ids'])
-        attention_masks.append(encoded_dict['attention_mask'])
-        if i == 0:
-            continue
-        cls_idx.append(cls_idx[i-1] + 128) # 128 is the max length of the input and we're padding to that length
-    
-    input_ids = torch.cat(input_ids, dim=0)
-    attention_masks = torch.cat(attention_masks, dim=0)
-    cls_idx = torch.tensor(cls_idx)
+    # Extract input_ids and attention_mask
+    input_ids = encoded_dict['input_ids'][0]
+    attention_masks = encoded_dict['attention_mask'][0]
 
-    # Flatten the vectors
-    input_ids = input_ids.flatten()
-    attention_masks = attention_masks.flatten()
-    
+    # Find indices of [CLS] tokens
+    cls_token_id = tokenizer.cls_token_id
+    cls_idx = (input_ids == cls_token_id).nonzero(as_tuple=True)[0]
+
+    print("Number of sentences:", len(sentences))
+    print("Number of tokens:", len(input_ids))
+    print("Number of [CLS] tokens:", len(cls_idx))
+
     return input_ids, attention_masks, cls_idx
-
-def get_embeddings(input_ids, attention_masks, model):
-    model.eval()
-    with torch.no_grad():
-        outputs = model(input_ids, attention_mask=attention_masks)
-    return outputs.last_hidden_state
-
-def extract_sentence_embeddings(embeddings):
-    # Assuming that the first token of each sentence is [CLS]
-    return embeddings[:,0,:]
 
 def pipeline(text, tokenizer):
     sentences = preprocess(text)
