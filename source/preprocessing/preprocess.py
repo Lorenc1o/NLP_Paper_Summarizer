@@ -2,165 +2,240 @@ from datasets import load_dataset
 import os
 import subprocess
 import argparse
+from transformers import DistilBertTokenizer, DistilBertModel
+import torch
+import torch.nn as nn
 
-def zip_to_stories(zip_dir, stories_dir, min_sentence_length=10):
+import nltk
+from nltk import sent_tokenize
+nltk.download('punkt')
+
+from rouge_score import rouge_scorer
+
+import numpy as np
+
+import json
+
+from model_update import EncoderModel, LinearClassifier, Summarizer
+
+def generate_oracle_summary(document, abstract, max_sentences=None, min_sentence_length=20):
     '''
-    Load the raw data from the zip files and save it to the stories directory
+        Generates an oracle summary for a given text with a given summary.
 
-    :param zip_dir: directory containing the zip files
-    :param stories_dir: directory to save the raw data to
+        As in the paper, the oracle summary is the set of sentences that maximizes ROUGE when added one at a time, greedily.
 
-    :return: None
+        Args:
+            document: the text to summarize
+            abstract: the summary of the text
+            max_sentences: the maximum number of sentences to include in the summary
+            min_sentence_length: the minimum length of a sentence to be included in the summary
+
+        Returns:
+            oracle_summary: a list of sentences that make up the oracle summary
+    '''
+    scorer = rouge_scorer.RougeScorer(['rouge1', 'rougeL'], use_stemmer=True)
+    sentences = sent_tokenize(document)
+    
+    # Initialize variables
+    selected_sentences = set()
+    best_rouge = 0.0
+    oracle_summary = []
+
+    # Iterate over sentences and select the one that maximizes ROUGE when added
+    while True:
+        best_sentence = None
+        for i, sentence in enumerate(sentences):
+            if i in selected_sentences or len(sentence) < min_sentence_length:
+                continue
+
+            # Create a temporary summary with the current sentence added
+            temp_summary = ' '.join([sentences[j] for j in selected_sentences | {i}])
+
+            # Calculate ROUGE score
+            scores = scorer.score(abstract, temp_summary)
+            rouge_score = np.mean([scores['rouge1'].fmeasure, scores['rougeL'].fmeasure])
+
+            # Check if this is the best score so far
+            if rouge_score > best_rouge:
+                best_rouge = rouge_score
+                best_sentence = i
+
+        # Break if no improvement or max_sentences reached
+        if best_sentence is None or (max_sentences and len(selected_sentences) >= max_sentences):
+            break
+
+        # Add the best sentence to the selected set
+        selected_sentences.add(best_sentence)
+
+    # Construct the oracle summary
+    oracle_summary = [sentences[i] for i in sorted(list(selected_sentences))]
+    return oracle_summary
+
+def zip_to_stories(zip_dir, stories_dir, min_sentence_length=20):
+    '''
+        Load the raw data from the zip files and save it to the stories as a json file
+
+        Args:
+            zip_dir: the directory containing the zip files
+            stories_dir: the directory to save the raw data to
+            min_sentence_length: the minimum length of a sentence to be included in the summary
+
+        Returns:
+            None
     '''
     dataset = load_dataset(zip_dir+"arxiv_summarization.py", 'section')
 
-    train_dataset = dataset['train']
-    val_dataset = dataset['validation']
-    test_dataset = dataset['test']
+    for dataset_split in ['train', 'validation', 'test']:
+        data_json = {}
+        for i, data in enumerate(dataset[dataset_split]):
+            data_json[dataset_split + '_' + str(i)] = {
+                'article': data['article'],
+                'abstract': generate_oracle_summary(data['article'], data['abstract'], 5, min_sentence_length)
+            }
 
-    for i, data in enumerate(train_dataset):
-        with open(os.path.join(stories_dir+"train", "train_"+str(i)+".story"), "w") as f:
-            # Write article and abstract to files, removing extra whitespaces
-            f.write(data['article'].strip() + "\n\n")
-            
-            # We need to separate the abstract into sentences
-            abstract = data['abstract'].strip().split(". ")
-            abstract = [sentence for sentence in abstract if len(sentence) >= min_sentence_length]
-            for sentence in abstract:
-                while sentence[0] == " " or sentence[0] == "\n":
-                    sentence = sentence[1:]
-                    if len(sentence) < min_sentence_length:
-                        break
-                if len(sentence) < min_sentence_length:
-                    continue
-                f.write("@highlight\n\n")
-                f.write(sentence + "\n\n")
+            # Print every 10 articles
+            if (i + 1) % 10 == 0:
+                print(f"{i + 1} articles processed in {dataset_split} dataset")
 
-    for i, data in enumerate(val_dataset):
-        with open(os.path.join(stories_dir+"val", "val_"+str(i)+".story"), "w") as f:
-            # Write article and abstract to files, removing extra whitespaces
-            f.write(data['article'].strip() + "\n\n")
-            
-            # We need to separate the abstract into sentences
-            abstract = data['abstract'].strip().split(". ")
-            abstract = [sentence for sentence in abstract if len(sentence) >= min_sentence_length]
-            for sentence in abstract:
-                while sentence[0] == " " or sentence[0] == "\n":
-                    sentence = sentence[1:]
-                    if len(sentence) < min_sentence_length:
-                        break
-                if len(sentence) < min_sentence_length:
-                    continue
-                f.write("@highlight\n\n")
-                f.write(sentence + "\n\n")
+            # Stop when there are 300 articles for train
+            if dataset_split == 'train' and i == 30:
+                break
+            # 100 articles for validation and test
+            elif dataset_split != 'train' and i == 2:
+                break
 
-    for i, data in enumerate(test_dataset):
-        with open(os.path.join(stories_dir+"test", "test_"+str(i)+".story"), "w") as f:
-            # Write article and abstract to files, removing extra whitespaces
-            f.write(data['article'].strip() + "\n\n")
-            
-            # We need to separate the abstract into sentences
-            abstract = data['abstract'].strip().split(". ")
-            abstract = [sentence for sentence in abstract if len(sentence) >= min_sentence_length]
-            for sentence in abstract:
-                while sentence[0] == " " or sentence[0] == "\n":
-                    sentence = sentence[1:]
-                    if len(sentence) < min_sentence_length:
-                        break
-                if len(sentence) < min_sentence_length:
-                    continue
-                f.write("@highlight\n\n")
-                f.write(sentence + "\n\n")
+        # Save as json file
+        with open(stories_dir + f'{dataset_split}.json', 'w') as f:
+            json.dump(data_json, f)
 
-def tokenize(args):
+
+def preprocess(text):
     '''
-    Tokenize the raw data using Stanford CoreNLP
-
-    :param args: command line arguments
-
-    :return: None
+        Preprocess the text by tokenizing it into sentences and adding special tokens
+        
+        Args:
+            text: the text to preprocess
+            
+        Returns:
+            tokenized_text: the tokenized text in sentence form
     '''
-    stories_dir = os.path.abspath(args.save_path) # Path to the folder containing the stories
-    tokenized_stories_dir = os.path.abspath(args.tokenized_path) # Path to the tokenized stories
+    sentences = sent_tokenize(text)
+    tokenized_text = ['[CLS] ' + sent + ' [SEP]' for sent in sentences]
+    return tokenized_text
 
-    print("Preparing to tokenize %s to %s..." % (stories_dir, tokenized_stories_dir))
-    subdirs = os.listdir(stories_dir) # stories_dir contains subdirectories for train, val and test
+def encode_sentences(sentences, tokenizer):
+    '''
+        Encode the sentences using the tokenizer
 
-    # make IO list file
-    print("Making list of files to tokenize...")
-    with open("mapping_for_corenlp.txt", "w") as f:
-        for subdir in subdirs:
-            stories = os.listdir(os.path.join(stories_dir, subdir))
-            for s in stories:
-                if (not s.endswith('story')):
-                    continue
-                f.write("%s\n" % (os.path.join(stories_dir, subdir, s))) # the input file path
-    command = ['java', 'edu.stanford.nlp.pipeline.StanfordCoreNLP', '-annotators', 'tokenize,ssplit',
-               '-ssplit.newlineIsSentenceBreak', 'always', '-filelist', 'mapping_for_corenlp.txt', '-outputFormat',
-               'json', '-outputDirectory', tokenized_stories_dir]
-    print("Tokenizing %i files in %s and saving in %s..." % (len(stories), stories_dir, tokenized_stories_dir))
-    subprocess.call(command)
-    print("Stanford CoreNLP Tokenizer has finished.")
-    os.remove("mapping_for_corenlp.txt")
+        Args:
+            sentences: the sentences to encode
+            tokenizer: the tokenizer to use
 
-    # Check that the tokenized stories directory contains the same number of files as the original directory
-    num_orig = 0
+        Returns:
+            input_ids: the input ids for the sentences
+            attention_masks: the attention masks for the sentences
+            cls_idx: the indices of the [CLS] tokens
+    '''
+    input_ids = []
+    attention_masks = []
+    cls_idx = [0]
 
-    for subdir in subdirs:
-        stories = os.listdir(os.path.join(stories_dir, subdir))
-        num_orig += len(stories)
-
-    num_tokenized = len(os.listdir(tokenized_stories_dir))
-    if num_orig != num_tokenized:
-        raise Exception(
-            "The tokenized stories directory %s contains %i files, but it should contain the same number as %s (which has %i files). Was there an error during tokenization?" % (
-                tokenized_stories_dir, num_tokenized, stories_dir, num_orig))
-    print("Successfully finished tokenizing %s to %s.\n" % (stories_dir, tokenized_stories_dir))
-
-    # At this point, the tokenized stories directory contains story files for train, val and test.
-    # Now we move them into separate directories for each dataset.
-    print("Splitting the tokenized dataset into train, val and test...")
-    stories = os.listdir(tokenized_stories_dir)
-    for subdir in subdirs:
-        if not os.path.exists(os.path.join(tokenized_stories_dir, subdir)):
-            os.makedirs(os.path.join(tokenized_stories_dir, subdir))
-    for s in stories:
-        if (not s.endswith('story')):
+    for i, sent in enumerate(sentences):
+        encoded_dict = tokenizer.encode_plus(
+                            sent,
+                            add_special_tokens = False,
+                            max_length = 128,
+                            pad_to_max_length = True,
+                            return_attention_mask = True,
+                            return_tensors = 'pt',
+                       )
+        input_ids.append(encoded_dict['input_ids'])
+        attention_masks.append(encoded_dict['attention_mask'])
+        if i == 0:
             continue
-        if s.startswith("train"):
-            os.rename(os.path.join(tokenized_stories_dir, s), os.path.join(tokenized_stories_dir, "train", s)) # Move the file to the train folder
-        elif s.startswith("val"):
-            os.rename(os.path.join(tokenized_stories_dir, s), os.path.join(tokenized_stories_dir, "val", s)) # Move the file to the val folder
-        elif s.startswith("test"):
-            os.rename(os.path.join(tokenized_stories_dir, s), os.path.join(tokenized_stories_dir, "test", s)) # Move the file to the test folder
-        else:
-            raise Exception("Failed to split %s into train, val and test." % (tokenized_stories_dir))
+        cls_idx.append(cls_idx[i-1] + 128) # 128 is the max length of the input and we're padding to that length
+    
+    input_ids = torch.cat(input_ids, dim=0)
+    attention_masks = torch.cat(attention_masks, dim=0)
+    cls_idx = torch.tensor(cls_idx)
 
+    # Flatten the vectors
+    input_ids = input_ids.flatten()
+    attention_masks = attention_masks.flatten()
+    
+    return input_ids, attention_masks, cls_idx
 
+def get_embeddings(input_ids, attention_masks, model):
+    model.eval()
+    with torch.no_grad():
+        outputs = model(input_ids, attention_mask=attention_masks)
+    return outputs.last_hidden_state
 
-zip_dir = "source/preprocessing/data/"
-stories_dir = "source/preprocessing/data/processed/"
-token_dir = "source/preprocessing/data/tokenized/"
+def extract_sentence_embeddings(embeddings):
+    # Assuming that the first token of each sentence is [CLS]
+    return embeddings[:,0,:]
 
-help_message = '''
-    Preprocess the raw data and tokenize it using Stanford CoreNLP
+def pipeline(text, tokenizer):
+    sentences = preprocess(text)
+    input_ids, attention_masks, cls_idx = encode_sentences(sentences, tokenizer)
+    return sentences, input_ids, attention_masks, cls_idx
 
-    Usage:
-        python preprocess.py --raw_path <path_to_raw_data> --save_path <path_to_save_data> --tokenized_path <path_to_save_tokenized_data> --preprocess <True/False> --tokenize <True/False>
+def pipeline_json(json_file, tokenizer):
     '''
+        Preprocess the json file and save the processed version in .pt format (suitable for loading with torch.load())
+
+        Args:
+            json_file: the json file to preprocess
+            tokenizer: the tokenizer to use
+            ea_embedding: the embedding for even sentences
+            eb_embedding: the embedding for odd sentences
+
+        Returns:
+            None
+    '''
+    with open(json_file) as f:
+        data = json.load(f)
+
+    for key in data:
+        print("Processing", key)
+        sentences, input_ids, attention_masks, cls_idx = pipeline(data[key]['article'], tokenizer)
+        data[key]['input_ids'] = input_ids.tolist()
+        data[key]['attention_masks'] = attention_masks.tolist()
+        data[key]['cls_idx'] = cls_idx.tolist()
+        # Transform the abstract from list of sentences to a {0,1} vector, where 1 indicates that the sentence i in the article is in the abstract
+        abstract = data[key]['abstract']
+        abstract_vector = [0] * len(sentences)
+        for sentence in abstract:
+            sentence = preprocess(sentence)[0]
+            if sentence in sentences:
+                abstract_vector[sentences.index(sentence)] = 1
+        data[key]['abstract_vector'] = abstract_vector
+        print("Done processing", key)
+
+    pt_file = json_file[:-5] + '.pt'
+    torch.save(data, pt_file)
 
 if __name__ == '__main__':
-    argparser = argparse.ArgumentParser(description=help_message)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--zip_dir", default="data/arxiv_summarization/", type=str, help="directory containing the zip files")
+    parser.add_argument("--zip_to_stories", default=False, type=bool, help="whether to convert the zip files to stories")
+    parser.add_argument("--stories_dir", default="data/arxiv_summarization/stories/", type=str, help="directory to save the raw data to")
+    parser.add_argument("--json_dir", default="data/arxiv_summarization/stories/", type=str, help="directory to save the json files to")
+    parser.add_argument("--max_sentences", default=3, type=int, help="maximum number of sentences to include in the summary")
+    parser.add_argument("--min_sentence_length", default=10, type=int, help="minimum length of a sentence to be included in the summary")
+    parser.add_argument("--model_name", default="distilbert-base-uncased", type=str, help="name of the model to use")
+    parser.add_argument("--output_dir", default="data/arxiv_summarization/summaries/", type=str, help="directory to save the summaries to")
+    parser.add_argument("--preprocess", default=False, type=bool, help="whether to preprocess the data")
+    args = parser.parse_args()
 
-    argparser.add_argument('--raw_path', type=str, default=zip_dir)
-    argparser.add_argument('--save_path', type=str, default=stories_dir)
-    argparser.add_argument('--tokenized_path', type=str, default=token_dir)
-    argparser.add_argument('--preprocess', type=bool, default=False)
-    argparser.add_argument('--tokenize', type=bool, default=False)
-
-    args = argparser.parse_args()
+    if args.zip_to_stories:
+        zip_to_stories(args.zip_dir, args.stories_dir, args.min_sentence_length)
 
     if args.preprocess:
-        zip_to_stories(args.raw_path, args.save_path)
-    if args.tokenize:
-        tokenize(args)
+        tokenizer = DistilBertTokenizer.from_pretrained(args.model_name)
+
+        # Preprocess the data
+        pipeline_json(args.json_dir + 'train.json', tokenizer)
+        pipeline_json(args.json_dir + 'validation.json', tokenizer)
+        pipeline_json(args.json_dir + 'test.json', tokenizer)
+
