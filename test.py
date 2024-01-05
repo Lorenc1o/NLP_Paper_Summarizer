@@ -18,15 +18,9 @@ def preprocess(text):
     tokenized_text = ['[CLS] ' + sent + ' [SEP]' for sent in sentences]
     return tokenized_text
 
-def initialize_segment_embeddings(model):
-    ea_embedding = torch.nn.Embedding(2, model.config.dim)
-    eb_embedding = torch.nn.Embedding(2, model.config.dim)
-    return ea_embedding, eb_embedding
-
 def encode_sentences(sentences, tokenizer):
     input_ids = []
     attention_masks = []
-    segment_ids = []  # Keep track of segments (odd or even)
 
     for i, sent in enumerate(sentences):
         encoded_dict = tokenizer.encode_plus(
@@ -40,26 +34,11 @@ def encode_sentences(sentences, tokenizer):
         
         input_ids.append(encoded_dict['input_ids'])
         attention_masks.append(encoded_dict['attention_mask'])
-        segment_ids.append(torch.full((1, 128), i % 2))  # 0 for even, 1 for odd sentences
-    
+
     input_ids = torch.cat(input_ids, dim=0)
     attention_masks = torch.cat(attention_masks, dim=0)
-    segment_ids = torch.cat(segment_ids, dim=0)
-    
-    return input_ids, attention_masks, segment_ids
 
-def add_segment_embeddings(embeddings, segment_ids, ea_embedding, eb_embedding):
-    # Get the batch size and sequence length from embeddings
-    batch_size, seq_length, hidden_size = embeddings.size()
-
-    # Expand segment embeddings to match the dimensions of BERT embeddings
-    ea_embeddings = ea_embedding(segment_ids).view(batch_size, seq_length, hidden_size)
-    eb_embeddings = eb_embedding(segment_ids).view(batch_size, seq_length, hidden_size)
-
-    # Add segment embeddings to the original embeddings
-    enhanced_embeddings = embeddings + torch.where(segment_ids.unsqueeze(-1) == 0, ea_embeddings, eb_embeddings)
-
-    return enhanced_embeddings
+    return input_ids, attention_masks
 
 def get_embeddings(input_ids, attention_masks, model):
     model.eval()
@@ -71,11 +50,10 @@ def extract_sentence_embeddings(embeddings):
     # Assuming that the first token of each sentence is [CLS]
     return embeddings[:,0,:]
 
-def pipeline(text, model, tokenizer, ea_embedding, eb_embedding):
+def pipeline(text, model, tokenizer):
     sentences = preprocess(text)
-    input_ids, attention_masks, segment_ids = encode_sentences(sentences, tokenizer)
+    input_ids, attention_masks = encode_sentences(sentences, tokenizer)
     embeddings = get_embeddings(input_ids, attention_masks, model)
-    embeddings = add_segment_embeddings(embeddings, segment_ids, ea_embedding, eb_embedding)
     sentence_embeddings = extract_sentence_embeddings(embeddings)
     return sentences, sentence_embeddings
 
