@@ -4,6 +4,7 @@ from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 from transformers import AdamW
 import matplotlib.pyplot as plt
+import argparse
 
 def read_pt_file(path):
     '''
@@ -19,15 +20,18 @@ def read_pt_file(path):
 
 # For now we trim the sequences to 512 tokens
 def trim_sequences(input_ids, attention_mask, abstract_vector, cls_idx, max_len=512):
+    i = 0
     if input_ids.shape[0] > max_len:
+        i += 1
         input_ids = input_ids[:max_len]
         attention_mask = attention_mask[:max_len]
         # For cls_idx, we only keep the cls_idx that are within the max_len
         cls_idx_upd = cls_idx[cls_idx < max_len]
         # For abstract_vector, we keep the same entries as cls_idx
         abstract_vector = abstract_vector[cls_idx < max_len]
-
-    return input_ids, attention_mask, abstract_vector, cls_idx_upd
+        return input_ids, attention_mask, abstract_vector, cls_idx_upd
+    else:
+        return input_ids, attention_mask, abstract_vector, cls_idx
 
 class SummarizationDataset(Dataset):
     def __init__(self, data):
@@ -115,13 +119,15 @@ def plot_loss(train_history, val_history):
     plt.show()
 
 if __name__ == '__main__':
-    training_loc = 'preprocessing/data/arxiv_summarization/stories/test.pt'
-    validation_loc = 'preprocessing/data/arxiv_summarization/stories/validation.pt'
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--train_loc", default='data/dialogueSum/stories/test.pt', type=str, help="path to the .pt training data")
+    parser.add_argument("--valid_loc", default='data/dialogueSum/stories/validation.pt', type=str, help="path to the .pt validation data")
+    args = parser.parse_args()
 
-    data_train = read_pt_file(training_loc)
+    data_train = read_pt_file(args.train_loc)
     dataset_train = SummarizationDataset(data_train)
 
-    data_val = read_pt_file(validation_loc)
+    data_val = read_pt_file(args.valid_loc)
     dataset_val = SummarizationDataset(data_val)
 
     train_loader = DataLoader(dataset_train, batch_size=32, shuffle=True, collate_fn=collate_fn)
