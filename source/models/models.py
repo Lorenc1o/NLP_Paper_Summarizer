@@ -2,6 +2,7 @@ from transformers import DistilBertModel, DistilBertConfig
 import torch.nn as nn
 import torch
 import numpy as np
+from models.our_transformers import TransformerEncoder
 
 class EncoderModel(nn.Module):
     def __init__(self):
@@ -25,13 +26,22 @@ class LinearClassifier(nn.Module):
         logits = self.sigmoid(linear_output)
         return logits
 
+class TransformerClassifier(nn.Module):
+    def __init__(self, d_model, num_heads, num_layers, d_ff, dropout):
+        super(TransformerClassifier, self).__init__()
+        self.transformer = TransformerEncoder(d_model, num_heads, d_ff, dropout, num_layers)
+        
+    def forward(self, x, mask):
+        return self.transformer(x, mask)
+
 
 class Summarizer(nn.Module):
-    def __init__(self, encoder, classifier, device):
+    def __init__(self, encoder, classifier, device, classifier_type='linear'):
         super(Summarizer, self).__init__()
         self.encoder = encoder
         self.classifier = classifier
         self.device = device
+        self.classifier_type = classifier_type
 
     def extract_cls_embeddings(self, encoded_output, cls_idx):
         # Assume encoded_output shape: [batch_size, sequence_length, hidden_size]
@@ -42,7 +52,7 @@ class Summarizer(nn.Module):
         num_sentences = np.max([len(x) for x in cls_idx])
 
         # Initialize an empty tensor to store the [CLS] embeddings
-        cls_embeddings = torch.zeros(batch_size, num_sentences, encoded_output.shape[2])
+        cls_embeddings = torch.zeros(batch_size, num_sentences, encoded_output.shape[2], device=self.device)
 
         # Handle each example in the batch separately
         for batch_idx in range(batch_size):
@@ -51,10 +61,12 @@ class Summarizer(nn.Module):
 
         return cls_embeddings
 
-
-
     def forward(self, input_ids, attention_mask, cls_idx):
         encoded_output = self.encoder(input_ids, attention_mask)
-        encoded_output = self.extract_cls_embeddings(encoded_output, cls_idx)
-        logits = self.classifier(encoded_output)
+        encoded_output = encoded_output * cls_idx.unsqueeze(2).float()
+
+        if self.classifier_type == 'linear':
+            logits = self.classifier(encoded_output)
+        elif self.classifier_type == 'transformer':
+            logits = self.classifier(encoded_output, cls_idx)
         return logits

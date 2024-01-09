@@ -133,7 +133,7 @@ def encode_sentences(sentences, tokenizer, max_length=512):
     Returns:
         input_ids: the input ids for the concatenated sentences
         attention_masks: the attention masks for the concatenated sentences
-        cls_idx: the indices of the [CLS] tokens
+        cls_idx: mask for the [CLS] tokens
     '''
     # Concatenate all sentences into one large string
     full_text = ' '.join(sentences)
@@ -152,11 +152,14 @@ def encode_sentences(sentences, tokenizer, max_length=512):
 
     # Find indices of [CLS] tokens
     cls_token_id = tokenizer.cls_token_id
-    cls_idx = (input_ids == cls_token_id).nonzero(as_tuple=True)[0]
+    cls_idx = torch.zeros(len(input_ids), dtype=torch.bool)
+    for i, token_id in enumerate(input_ids):
+        if token_id == cls_token_id:
+            cls_idx[i] = True
 
     print("Number of sentences:", len(sentences))
     print("Number of tokens:", len(input_ids))
-    print("Number of [CLS] tokens:", len(cls_idx))
+    print("Number of [CLS] tokens:", sum(cls_idx))
 
     return input_ids, attention_masks, cls_idx
 
