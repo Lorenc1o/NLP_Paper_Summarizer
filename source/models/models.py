@@ -44,26 +44,38 @@ class Summarizer(nn.Module):
         self.classifier_type = classifier_type
 
     def extract_cls_embeddings(self, encoded_output, cls_idx):
-        # Assume encoded_output shape: [batch_size, sequence_length, hidden_size]
-        # cls_idx is a list of lists of indices for [CLS] tokens
+        masked_output = encoded_output * cls_idx.unsqueeze(-1).float()
 
-        # Batch size and number of sentences (as the max number of sentences in all batch)
-        batch_size = encoded_output.shape[0]
-        num_sentences = np.max([len(x) for x in cls_idx])
+        # Determine the maximum number of [CLS] tokens in the batch
+        max_num_cls = max(cls_idx.sum(dim=1))
 
-        # Initialize an empty tensor to store the [CLS] embeddings
-        cls_embeddings = torch.zeros(batch_size, num_sentences, encoded_output.shape[2], device=self.device)
+        # Initialize a list to hold the padded [CLS] embeddings for each batch
+        padded_cls_embeddings = []
 
-        # Handle each example in the batch separately
-        for batch_idx in range(batch_size):
-            for i, idx in enumerate(cls_idx[batch_idx]):
-                cls_embeddings[batch_idx, i, :] = encoded_output[batch_idx, idx, :]
+        for i in range(masked_output.size(0)):
+            cls_embeddings = masked_output[i]
+            non_zero_embeddings = cls_embeddings[cls_embeddings.sum(dim=1) != 0]
 
-        return cls_embeddings
+            # Pad the non-zero embeddings to the same length
+            num_padding = max_num_cls - non_zero_embeddings.size(0)
+            padding = torch.zeros(num_padding, non_zero_embeddings.size(1), device=non_zero_embeddings.device)
+            padded_embeddings = torch.cat([non_zero_embeddings, padding], dim=0)
+            padded_cls_embeddings.append(padded_embeddings)
+
+        # Stack the padded embeddings to get a tensor of shape [batch_size, max_num_cls, 768]
+        encoded_output = torch.stack(padded_cls_embeddings, dim=0)
+        return encoded_output
 
     def forward(self, input_ids, attention_mask, cls_idx):
+        # input_ids shape: [batch_size, num_tokens]
+        # attention_mask shape: [batch_size, num_tokens]
+        # cls_idx shape: [batch_size, num_tokens]
         encoded_output = self.encoder(input_ids, attention_mask)
-        encoded_output = encoded_output * cls_idx.unsqueeze(2).float()
+        # encoded_output shape: [batch_size, num_tokens, 768]
+        
+        # Extract the [CLS] embeddings
+        encoded_output = self.extract_cls_embeddings(encoded_output, cls_idx)
+        # encoded_output shape: [batch_size, max_num_sentences, 768]
 
         if self.classifier_type == 'linear':
             logits = self.classifier(encoded_output)

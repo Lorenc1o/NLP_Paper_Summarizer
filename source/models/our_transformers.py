@@ -103,7 +103,7 @@ class EncoderLayer(nn.Module):
             x = self.layernorm(x)
 
         mask = mask.unsqueeze(1)
-        context = self.multi_head_attn(x, x, x, mask)[0]
+        context = self.multi_head_attn(x, x, x)[0]
         out = self.dropout(context) + x
         out = self.position_wise_ff(out)
         return out
@@ -127,15 +127,15 @@ class TransformerEncoder(nn.Module):
 
         batch_size, n_sents = top_vecs.size(0), top_vecs.size(1)
         pos_emb = self.pos_emb.pe[:, :n_sents]
-        x = top_vecs * mask[:, :, None].float()
+        #x = top_vecs * mask[:, :, None].float()
         # x = x + pos_emb^T
-        x = x + pos_emb.transpose(0, 1)
+        x = top_vecs + pos_emb.transpose(0, 1)
 
         for i in range(self.num_inter_layers):
             x = self.transformer_inter[i](x, mask, i)
 
         x = self.layer_norm(x)
         sent_scores = self.sigmoid(self.wo(x))
-        sent_scores = sent_scores.squeeze(-1) * mask.float()
+        sent_scores = sent_scores.squeeze(-1) #* mask.float()
 
         return sent_scores

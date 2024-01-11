@@ -87,6 +87,28 @@ def collate_fn(batch):
 
     return input_ids_padded, attention_masks_padded, labels_padded, cls_idx
 
+def extract_labels(labels, cls_idx):
+    # labels shape: [batch_size, num_tokens]
+    # cls_idx shape: [batch_size, num_tokens]
+    # 1. Add 1 to all labels: 0 -> 1, 1 -> 2
+    labels = labels + 1
+    # 2. Multiply labels by cls_idx: 0 and cls_idx -> 1, 1 and cls_idx -> 2, else -> 0
+    labels = labels * cls_idx
+
+    max_num_cls = max(cls_idx.sum(dim=1))
+    # 3. Pad the labels to the same length
+    padded_labels = []
+    for i in range(labels.size(0)):
+        cls_labels = labels[i,:]
+        non_zero_labels = cls_labels[cls_labels != 0]
+        num_padding = max_num_cls - non_zero_labels.size(0)
+        padding = torch.ones(num_padding, device=non_zero_labels.device)
+        padded_labels.append(torch.cat([non_zero_labels, padding], dim=0))
+    padded_labels = torch.stack(padded_labels, dim=0)
+    # 4. Subtract 1 from all labels: 1 -> 0, 2 -> 1
+    padded_labels = padded_labels - 1
+    return padded_labels
+
 def train(model, data_loader, optimizer, criterion, verbose=False):
     model.train()
     total_loss = 0
@@ -102,6 +124,8 @@ def train(model, data_loader, optimizer, criterion, verbose=False):
 
         logits = model(input_ids, attention_masks, cls_idx)
         logits = torch.squeeze(logits)
+
+        labels = extract_labels(labels, cls_idx)
 
         # Convert labels to float
         labels_float = labels.float().squeeze().to(model.device)
@@ -132,6 +156,8 @@ def validate(model, data_loader, criterion):
             logits = model(input_ids, attention_masks, cls_idx)
             logits = torch.squeeze(logits)
 
+            labels = extract_labels(labels, cls_idx)
+
             # Convert labels to float
             labels_float = labels.float().squeeze().to(model.device)
 
@@ -155,13 +181,13 @@ if __name__ == '__main__':
     parser.add_argument("--model_type", default='transformer', type=str, help="type of model to use: transformer or linear")
     parser.add_argument("--verbose", default=False, type=bool, help="whether to print the loss after each batch")
     parser.add_argument("--batch_size", default=10, type=int, help="batch size")
-    parser.add_argument("--train_size", default='all', type=int, help="number of training examples")
+    parser.add_argument("--train_size", default='all', type=str, help="number of examples to train on")
     args = parser.parse_args()
 
     data_train = read_pt_file(args.train_loc)
     dataset_train = SummarizationDataset(data_train)
     if args.train_size != 'all':
-        dataset_train = torch.utils.data.Subset(dataset_train, range(args.train_size))
+        dataset_train = torch.utils.data.Subset(dataset_train, range(int(args.train_size)))
 
     data_val = read_pt_file(args.valid_loc)
     dataset_val = SummarizationDataset(data_val)
@@ -197,9 +223,9 @@ if __name__ == '__main__':
 
         print(f'Epoch {epoch}: train loss {train_loss} val loss {val_loss}')
 
-    torch.save(model.state_dict(), args.output_dir + args.model_loc)
-    torch.save(train_history, args.output_dir + 'train_history.pt')
-    torch.save(val_history, args.output_dir + 'val_history.pt')
+    torch.save(model.state_dict(), args.output_dir + args.model_loc[:-3] + args.model_type + '.pt')
+    torch.save(train_history, args.output_dir + 'train_history' + args.model_type + '.pt')
+    torch.save(val_history, args.output_dir + 'val_history.pt' + args.model_type + '.pt')
 
     plot_loss(train_history, val_history)
   
