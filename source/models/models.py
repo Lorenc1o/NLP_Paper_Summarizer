@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch
 import numpy as np
 from models.our_transformers import TransformerEncoder
+from nltk import sent_tokenize
+from transformers import DistilBertTokenizer
 
 class EncoderModel(nn.Module):
     def __init__(self):
@@ -36,12 +38,16 @@ class TransformerClassifier(nn.Module):
 
 
 class Summarizer(nn.Module):
-    def __init__(self, encoder, classifier, device, classifier_type='linear'):
+    def __init__(self, device, classifier_type='linear'):
         super(Summarizer, self).__init__()
-        self.encoder = encoder
-        self.classifier = classifier
+        self.encoder = EncoderModel()
+        if classifier_type == 'linear':
+            self.classifier = LinearClassifier(768, 1)
+        elif classifier_type == 'transformer':
+            self.classifier = TransformerClassifier(768, 1, 1, 768, 0.1)
         self.device = device
         self.classifier_type = classifier_type
+        self.tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
 
     def extract_cls_embeddings(self, encoded_output, cls_idx):
         masked_output = encoded_output * cls_idx.unsqueeze(-1).float()
@@ -82,3 +88,41 @@ class Summarizer(nn.Module):
         elif self.classifier_type == 'transformer':
             logits = self.classifier(encoded_output, cls_idx)
         return logits
+    
+    def preprocess(self, text, max_length=512):
+        sentences = sent_tokenize(text)
+        tokenized_text = ['[CLS] ' + sent + ' [SEP]' for sent in sentences]
+        full_text = ' '.join(tokenized_text)
+        encoded_dict = self.tokenizer.encode_plus(
+            full_text,
+            add_special_tokens=False,  # Since [CLS] and [DEL] are already added in sentences
+            return_attention_mask=True,
+            return_tensors='pt',
+            truncation=True,
+            max_length=max_length
+        )
+        input_ids = encoded_dict['input_ids'][0]
+        attention_masks = encoded_dict['attention_mask'][0]
+        cls_idx = torch.zeros(len(input_ids), dtype=torch.bool)
+        for i, token_id in enumerate(input_ids):
+            if token_id == self.tokenizer.cls_token_id:
+                cls_idx[i] = True
+        return input_ids, attention_masks, cls_idx
+
+    def predict(self, text, sum_len=3):
+        input_ids, attention_masks, cls_idx = self.preprocess(text)
+        input_ids = input_ids.unsqueeze(0)
+        attention_masks = attention_masks.unsqueeze(0)
+        cls_idx = cls_idx.unsqueeze(0)
+        input_ids = input_ids.to(self.device)
+        attention_masks = attention_masks.to(self.device)
+        cls_idx = cls_idx.to(self.device)
+        logits = self.forward(input_ids, attention_masks, cls_idx)
+        logits = logits.squeeze(0)
+        logits = logits.cpu().detach().numpy()
+        summary = np.argsort(logits, axis=0)[-sum_len:]
+        summary = summary.tolist()
+        summary = [sent_tokenize(text)[i[0]] for i in summary]
+        summary = ' '.join(summary)
+        return summary, logits
+

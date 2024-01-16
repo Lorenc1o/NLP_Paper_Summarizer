@@ -1,10 +1,11 @@
 import torch
-from models.models import EncoderModel, LinearClassifier, TransformerClassifier, Summarizer
+from models.models import Summarizer
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 from transformers import AdamW
 import matplotlib.pyplot as plt
 import argparse
+from tqdm import tqdm
 
 def read_pt_file(path):
     '''
@@ -113,7 +114,7 @@ def train(model, data_loader, optimizer, criterion, verbose=False):
     model.train()
     total_loss = 0
 
-    for input_ids, attention_masks, labels, cls_idx in data_loader:
+    for input_ids, attention_masks, labels, cls_idx in tqdm(data_loader):
         optimizer.zero_grad()
 
         # Ensure the data is on the correct device (CPU or GPU)
@@ -182,6 +183,8 @@ if __name__ == '__main__':
     parser.add_argument("--verbose", default=False, type=bool, help="whether to print the loss after each batch")
     parser.add_argument("--batch_size", default=10, type=int, help="batch size")
     parser.add_argument("--train_size", default='all', type=str, help="number of examples to train on")
+    parser.add_argument("--valid_size", default='all', type=str, help="number of examples to validate on")
+    parser.add_argument("--epochs", default=10, type=int, help="number of epochs")
     args = parser.parse_args()
 
     data_train = read_pt_file(args.train_loc)
@@ -195,16 +198,9 @@ if __name__ == '__main__':
     train_loader = DataLoader(dataset_train, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
     val_loader = DataLoader(dataset_val, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
 
-    bert = EncoderModel()
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    if args.model_type == 'transformer':
-        classifier = TransformerClassifier(768, 1, 1, 768, 0.1)
-    else:
-        classifier = LinearClassifier(768, 1)
-
-    device = 'cuda'
-
-    model = Summarizer(bert, classifier, device, args.model_type)
+    model = Summarizer(device, args.model_type)
     model.to(device)
 
     optimizer = AdamW(model.parameters(), lr=1e-5)
@@ -214,8 +210,10 @@ if __name__ == '__main__':
     train_history = []
     val_history = []
 
-    for epoch in range(10):
-        train_loss = train(model, train_loader, optimizer, criterion, args.verbose)
+    n_epochs = args.epochs
+    verbose = True if args.verbose == 'True' else False
+    for epoch in range(n_epochs):
+        train_loss = train(model, train_loader, optimizer, criterion, verbose)
         val_loss = validate(model, val_loader, criterion)
 
         train_history.append(train_loss)
@@ -223,9 +221,9 @@ if __name__ == '__main__':
 
         print(f'Epoch {epoch}: train loss {train_loss} val loss {val_loss}')
 
-    torch.save(model.state_dict(), args.output_dir + args.model_loc[:-3] + args.model_type + '.pt')
-    torch.save(train_history, args.output_dir + 'train_history' + args.model_type + '.pt')
-    torch.save(val_history, args.output_dir + 'val_history.pt' + args.model_type + '.pt')
 
-    plot_loss(train_history, val_history)
-  
+    model_name = args.model_loc.split('/')[-1]
+    model_name = model_name.split('.')[0]
+    torch.save(model.state_dict(), args.output_dir + model_name + '.pt')
+    torch.save(train_history, args.output_dir + 'train_history_' + args.model_type + '.pt')
+    torch.save(val_history, args.output_dir + 'val_history_' + args.model_type + '.pt')  
