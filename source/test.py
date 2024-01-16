@@ -28,7 +28,7 @@ if __name__ == '__main__':
 
     # Predict the summaries
     summaries = {}
-    rouge_scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeLsum'])
+    scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeLsum'])
     scores = {}
     scores['rouge1'] = []
     scores['rouge2'] = []
@@ -41,7 +41,7 @@ if __name__ == '__main__':
         summaries[key] = {}
         summaries[key]['real'] = abstract
         summaries[key]['predicted'] = summary
-        summaries[key]['rouge_score'] = rouge_scorer.score(abstract, summaries[key]['predicted'])
+        summaries[key]['rouge_score'] = scorer.score(abstract, summaries[key]['predicted'])
         scores['rouge1'].append(summaries[key]['rouge_score']['rouge1'].fmeasure)
         scores['rouge2'].append(summaries[key]['rouge_score']['rouge2'].fmeasure)
         scores['rougeLsum'].append(summaries[key]['rouge_score']['rougeLsum'].fmeasure)

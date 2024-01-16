@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch
 import numpy as np
 from models.our_transformers import TransformerEncoder
+import nltk
+nltk.download('punkt')
 from nltk import sent_tokenize
 from transformers import DistilBertTokenizer
 
