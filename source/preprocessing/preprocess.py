@@ -69,7 +69,56 @@ def generate_oracle_summary(document, abstract, max_sentences=None, min_sentence
     oracle_summary = [sentences[i] for i in sorted(list(selected_sentences))]
     return oracle_summary
 
-def zip_to_stories(zip_dir, stories_dir, min_sentence_length=20):
+def split_into_chunks(tokenizer, text, max_n_tokens = 512, min_n_tokens = 200):
+    """Splitting the Article into a set sentence that comprise a max of 512 tokens
+    min_n_tokens - to remove too small chunks that are left in the end. """
+    # text = data['article']
+    
+    sentences = sent_tokenize(text)
+    chunks = [[]]
+    n_tokens = 0
+
+    for sentence in sentences:
+
+        encoded_dict = tokenizer.encode_plus(
+            sentence,
+            add_special_tokens=False,  # Since [CLS] and [DEL] are already added in sentences
+            return_attention_mask=True,
+            return_tensors='pt',
+            truncation=False)
+
+        # Extract input_ids and attention_mask
+        input_ids = encoded_dict['input_ids'][0]
+
+        n_tokens += len(input_ids) + 2
+        if n_tokens < max_n_tokens:
+            chunks[-1].append(sentence)
+        else:
+            chunks.append([])
+            n_tokens = 0
+
+    for chunk in chunks:
+        encoded_dict = tokenizer.encode_plus(
+            " ".join(chunk),
+            add_special_tokens=False,  # Since [CLS] and [DEL] are already added in sentences
+            return_attention_mask=True,
+            return_tensors='pt',
+            truncation=False)
+
+        # Extract input_ids and attention_mask
+        input_ids = encoded_dict['input_ids'][0]
+        print('length:',len(input_ids))
+
+        if len(input_ids) >= 512:
+            raise Exception("Number of tokens exceeded 512!!!")
+            break
+    
+    # last chunks are usually very short, skip them
+    chunks = [chunk for chunk in chunks if len(input_ids) >= min_n_tokens]
+    
+    return chunks
+
+def zip_to_stories(tokenizer, zip_dir, stories_dir, min_sentence_length=20):
     '''
         Load the raw data from the zip files and save it to the stories as a json file
 
@@ -86,10 +135,14 @@ def zip_to_stories(zip_dir, stories_dir, min_sentence_length=20):
     for dataset_split in ['train', 'validation', 'test']:
         data_json = {}
         for i, data in enumerate(dataset[dataset_split]):
-            data_json[dataset_split + '_' + str(i)] = {
-                'article': data['article'],
-                'abstract': generate_oracle_summary(data['article'], data['abstract'], 5, min_sentence_length)
-            }
+            # split into chunks
+            chunks = split_into_chunks(tokenizer, data['article'])
+            for j, chunk in enumerate(chunks):
+                text = " ".join(chunk)
+                data_json[dataset_split + '_' + str(i) + '_' + str(j)] = {
+                    'article': text,
+                    'abstract': generate_oracle_summary(text, data['abstract'], 2, min_sentence_length)
+                }
 
             # Print every 10 articles
             if (i + 1) % 10 == 0:
@@ -99,13 +152,12 @@ def zip_to_stories(zip_dir, stories_dir, min_sentence_length=20):
             if dataset_split == 'train' and i == 30:
                 break
             # 100 articles for validation and test
-            elif dataset_split != 'train' and i == 2:
+            elif dataset_split != 'train' and i == 6:
                 break
 
         # Save as json file
         with open(stories_dir + f'{dataset_split}.json', 'w') as f:
             json.dump(data_json, f)
-
 
 def preprocess(text):
     '''
@@ -206,22 +258,22 @@ def pipeline_json(json_file, tokenizer):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--zip_dir", default="data/arxiv_summarization/", type=str, help="directory containing the zip files")
-    parser.add_argument("--zip_to_stories", default=False, type=bool, help="whether to convert the zip files to stories")
+    parser.add_argument("--zip_to_stories", default=True, type=bool, help="whether to convert the zip files to stories")
     parser.add_argument("--stories_dir", default="data/arxiv_summarization/stories/", type=str, help="directory to save the raw data to")
     parser.add_argument("--json_dir", default="data/arxiv_summarization/stories/", type=str, help="directory to save the json files to")
     parser.add_argument("--max_sentences", default=3, type=int, help="maximum number of sentences to include in the summary")
     parser.add_argument("--min_sentence_length", default=10, type=int, help="minimum length of a sentence to be included in the summary")
     parser.add_argument("--model_name", default="distilbert-base-uncased", type=str, help="name of the model to use")
     parser.add_argument("--output_dir", default="data/arxiv_summarization/summaries/", type=str, help="directory to save the summaries to")
-    parser.add_argument("--preprocess", default=False, type=bool, help="whether to preprocess the data")
+    parser.add_argument("--preprocess", default=True, type=bool, help="whether to preprocess the data")
     args = parser.parse_args()
 
+    tokenizer = DistilBertTokenizer.from_pretrained(args.model_name)
+
     if args.zip_to_stories:
-        zip_to_stories(args.zip_dir, args.stories_dir, args.min_sentence_length)
+        zip_to_stories(tokenizer, args.zip_dir, args.stories_dir, args.min_sentence_length)
 
     if args.preprocess:
-        tokenizer = DistilBertTokenizer.from_pretrained(args.model_name)
-
         # Preprocess the data
         pipeline_json(args.json_dir + 'train.json', tokenizer)
         pipeline_json(args.json_dir + 'validation.json', tokenizer)
