@@ -7,6 +7,7 @@ import nltk
 nltk.download('punkt')
 from nltk import sent_tokenize
 from transformers import DistilBertTokenizer
+from preprocessing.preprocess import split_into_chunks
 
 class EncoderModel(nn.Module):
     def __init__(self):
@@ -110,9 +111,11 @@ class Summarizer(nn.Module):
             if token_id == self.tokenizer.cls_token_id:
                 cls_idx[i] = True
         return input_ids, attention_masks, cls_idx
-
-    def predict(self, text, sum_len=3):
+    
+    def summarize(self, sum_len, text):
+        # process each chunk
         input_ids, attention_masks, cls_idx = self.preprocess(text)
+        print('n_tokens', len(input_ids))
         input_ids = input_ids.unsqueeze(0)
         attention_masks = attention_masks.unsqueeze(0)
         cls_idx = cls_idx.unsqueeze(0)
@@ -126,5 +129,43 @@ class Summarizer(nn.Module):
         summary = summary.tolist()
         summary = [sent_tokenize(text)[i[0]] for i in summary]
         summary = ' '.join(summary)
+        return summary, logits
+
+    def predict(self, text, sum_len=6, method='sum_all', n_sent=1, ch_sum_len = 2):
+        """
+        ch_sum_len - number of sentences to output for summaries of chunks
+        sum_len - number of sentences to output for the summary
+        method, can be either sum_all (summarize all summaries) or
+            takeN - take N highest-score sentences, using n_sent
+        """
+        # split the text into chunks
+        chunks = split_into_chunks(self.tokenizer, text)
+        summaries = []
+        logitses = []
+        print('chunks', chunks)
+        print('len chunks', len(chunks))
+
+        if len(chunks) == 1:
+            # initial text is under 512 tokens
+            ch_text = " ".join(chunks[0])
+            summary, logits = self.summarize(sum_len, ch_text)
+
+        else:
+            for j, chunk in enumerate(chunks):
+                ch_text = " ".join(chunk)
+                print('chunk', len(ch_text), j)
+                summary, logits = self.summarize(ch_sum_len, ch_text)
+                summaries.append(summary)
+                logitses.append(logits)
+            
+            if method == 'sum_all':
+                sum_text = " ".join(summaries)
+                summary, logits = self.summarize(sum_len, sum_text)
+
+            elif method == 'takeN':
+                summaries = [summary[:n_sent] for summary in summaries]
+                summary = " ".join(summaries)
+                logits = None
+
         return summary, logits
 
