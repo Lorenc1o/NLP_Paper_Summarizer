@@ -148,12 +148,12 @@ def zip_to_stories(tokenizer, zip_dir, stories_dir, min_sentence_length, ch_sum_
             if (i + 1) % 10 == 0:
                 print(f"{i + 1} articles processed in {dataset_split} dataset")
 
-            # # Stop when there are 300 articles for train
-            # if dataset_split == 'train' and i == 1:
-            #     break
-            # # 100 articles for validation and test
-            # elif dataset_split != 'train' and i == 0:
-            #     break
+            # Stop when there are 300 articles for train
+            if dataset_split == 'train' and i == 10000:
+                break
+            # 100 articles for validation and test
+            elif dataset_split != 'train' and i == 1000:
+                break
 
         # Save as json file
         with open(stories_dir + f'{dataset_split}.json', 'w') as f:
