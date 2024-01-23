@@ -127,7 +127,7 @@ class Summarizer(nn.Module):
         logits = logits.cpu().detach().numpy()
         summary = np.argsort(logits, axis=0)[-sum_len:]
         summary = summary.tolist()
-        summary = [sent_tokenize(text)[i[0]] for i in summary]
+        summary = [sent_tokenize(text)[i] if isinstance(i, int) else sent_tokenize(text)[i[0]] for i in summary]
         summary = ' '.join(summary)
         return summary, logits
 
