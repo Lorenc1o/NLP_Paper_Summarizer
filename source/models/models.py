@@ -115,7 +115,7 @@ class Summarizer(nn.Module):
     def summarize(self, sum_len, text):
         # process each chunk
         input_ids, attention_masks, cls_idx = self.preprocess(text)
-        print('n_tokens', len(input_ids))
+        # print('n_tokens', len(input_ids))
         input_ids = input_ids.unsqueeze(0)
         attention_masks = attention_masks.unsqueeze(0)
         cls_idx = cls_idx.unsqueeze(0)
@@ -142,8 +142,8 @@ class Summarizer(nn.Module):
         chunks = split_into_chunks(self.tokenizer, text)
         summaries = []
         logitses = []
-        print('chunks', chunks)
-        print('len chunks', len(chunks))
+        # print('chunks', chunks)
+        # print('len chunks', len(chunks))
 
         if len(chunks) == 1:
             # initial text is under 512 tokens
@@ -153,7 +153,7 @@ class Summarizer(nn.Module):
         else:
             for j, chunk in enumerate(chunks):
                 ch_text = " ".join(chunk)
-                print('chunk', len(ch_text), j)
+                # print('chunk', len(ch_text), j)
                 summary, logits = self.summarize(ch_sum_len, ch_text)
                 summaries.append(summary)
                 logitses.append(logits)
