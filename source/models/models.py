@@ -79,6 +79,7 @@ class Summarizer(nn.Module):
         # input_ids shape: [batch_size, num_tokens]
         # attention_mask shape: [batch_size, num_tokens]
         # cls_idx shape: [batch_size, num_tokens]
+        input_ids = input_ids.long()
         encoded_output = self.encoder(input_ids, attention_mask)
         # encoded_output shape: [batch_size, num_tokens, 768]
         
@@ -112,7 +113,7 @@ class Summarizer(nn.Module):
                 cls_idx[i] = True
         return input_ids, attention_masks, cls_idx
     
-    def summarize(self, sum_len, text):
+    def summarize(self, sum_len, text, isTaken):
         # process each chunk
         input_ids, attention_masks, cls_idx = self.preprocess(text)
         # print('n_tokens', len(input_ids))
@@ -126,12 +127,14 @@ class Summarizer(nn.Module):
         logits = logits.squeeze(0)
         logits = logits.cpu().detach().numpy()
         summary = np.argsort(logits, axis=0)[-sum_len:]
+        top_logits_values = [float(i) for i in logits[summary]]
         summary = summary.tolist()
         summary = [sent_tokenize(text)[i] if isinstance(i, int) else sent_tokenize(text)[i[0]] for i in summary]
-        summary = ' '.join(summary)
-        return summary, logits
+        if not isTaken:
+            summary = ' '.join(summary)
+        return summary, logits, top_logits_values
 
-    def predict(self, text, sum_len=6, method='sum_all', n_sent=1, ch_sum_len = 2):
+    def predict(self, text, sum_len=6, method='sum_all', n_sent=1, ch_sum_len = 1):
         """
         ch_sum_len - number of sentences to output for summaries of chunks
         sum_len - number of sentences to output for the summary
@@ -146,26 +149,37 @@ class Summarizer(nn.Module):
         # print('len chunks', len(chunks))
 
         if len(chunks) == 1:
+            print('chunk 1')
             # initial text is under 512 tokens
             ch_text = " ".join(chunks[0])
-            summary, logits = self.summarize(sum_len, ch_text)
+            summary, logits, _ = self.summarize(sum_len, ch_text, False)
 
         else:
             for j, chunk in enumerate(chunks):
                 ch_text = " ".join(chunk)
                 # print('chunk', len(ch_text), j)
-                summary, logits = self.summarize(ch_sum_len, ch_text)
+                summary, logits, top_logits_values = self.summarize(ch_sum_len, ch_text, True)
                 summaries.append(summary)
-                logitses.append(logits)
+                logitses.append(top_logits_values)
             
             if method == 'sum_all':
-                sum_text = " ".join(summaries)
-                summary, logits = self.summarize(sum_len, sum_text)
+                new_summaries = []
+                for summary in summaries:
+                    new_summaries.extend(summary)
+                sum_text = " ".join(new_summaries)
+                summary, logits, _ = self.summarize(sum_len, sum_text, False)
 
             elif method == 'takeN':
-                summaries = [summary[:n_sent] for summary in summaries]
+                summaries = [summary[-n_sent:] for summary in summaries]
+                summaries = [item for sublist in summaries for item in sublist]
+                logitses = [logits[-n_sent:] for logits in logitses]
+                logitses = [item for sublist in logitses for item in sublist]
+                logit_indexes = sorted(range(len(logitses)), key=lambda i: logitses[i], reverse=True)[:sum_len]
+                summaries = [summaries[i] for i in logit_indexes]
+                # print('len_sum', len(summaries))
+                logitses = [logitses[i] for i in logit_indexes]
                 summary = " ".join(summaries)
-                logits = None
+                logits = logitses
 
         return summary, logits
 

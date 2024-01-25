@@ -36,8 +36,9 @@ if __name__ == '__main__':
     for key in tqdm(data):
         text = data[key]['article']
         abstract = data[key]['abstract']
+        sum_len = len(abstract)
         abstract = ' '.join(abstract)
-        summary, _ = model.predict(text, args.sum_len)
+        summary, _ = model.predict(text, sum_len, method='takeN')
         summaries[key] = {}
         summaries[key]['real'] = abstract
         summaries[key]['predicted'] = summary
