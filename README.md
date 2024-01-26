@@ -16,7 +16,7 @@ The datasets can be found at:
 
 ### Environment
 
-Install the dependencies from the `requirements.txt` file. We recommend using a virtual environment and used Python 3.9.18.
+Install the dependencies from the `requirements.txt` file. We recommend using a virtual environment and Python 3.9.18.
 
 ### Preprocessing
 
@@ -61,4 +61,7 @@ Where:
 
 ### Evaluation
 You can use the script `experiment.sh` to run experiments. You can run different experiments with the script `run_experiments.sh`, where you can add all the different parameters you want to test.
+
+### Testing the predictive strategy on another model
+You can also predict the summaries with the baseline model with both sum_of_sums strategy and of the full text at once by running: `python bert_summarize.py`
 
