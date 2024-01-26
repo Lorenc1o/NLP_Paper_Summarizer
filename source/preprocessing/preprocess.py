@@ -288,7 +288,7 @@ if __name__ == '__main__':
 
     if args.preprocess:
         # Preprocess the data
-        # pipeline_json(args.json_dir + 'train.json', tokenizer)
-        # pipeline_json(args.json_dir + 'validation.json', tokenizer)
+        pipeline_json(args.json_dir + 'train.json', tokenizer)
+        pipeline_json(args.json_dir + 'validation.json', tokenizer)
         pipeline_json(args.json_dir + 'test.json', tokenizer)
 
